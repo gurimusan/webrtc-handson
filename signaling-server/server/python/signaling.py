@@ -20,6 +20,7 @@ async def unregister_client(ws):
 
 
 async def handler(ws, path):
+    print("-- websocket connected --")
     await register_client(ws)
     try:
         async for message in ws:
@@ -27,6 +28,7 @@ async def handler(ws, path):
             await notify(ws, message)
     finally:
         await unregister_client(ws)
+        print("- disconnected -")
 
 
 start_server = websockets.serve(handler, None, 3001)
