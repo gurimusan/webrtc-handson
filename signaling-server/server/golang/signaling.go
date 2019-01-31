@@ -1,33 +1,45 @@
 package main
 
 import (
-	"container/list"
 	"fmt"
 	"golang.org/x/net/websocket"
 	"io"
 	"log"
 	"net/http"
+	"sync"
 )
 
-var clients = list.List{}
+var clients map[*websocket.Conn]struct{} = make(map[*websocket.Conn]struct{})
+var mutex sync.RWMutex
 
-func notify(sender *websocket.Conn, message string) {
-	for e := clients.Front(); e != nil; e = e.Next() {
-		if e.Value != sender {
-			websocket.Message.Send(e.Value.(*websocket.Conn), message)
+func notify(sender *websocket.Conn, message string) error {
+	mutex.RLock()
+
+	for c := range clients {
+		if c != sender {
+			if err := websocket.Message.Send(c, message); err != nil {
+				return err
+			}
 		}
 	}
+	mutex.RUnlock()
+
+	return nil
 }
 
 func handler(conn *websocket.Conn) {
 	log.Println("-- websocket connected --")
 
-	e := clients.PushBack(conn)
+	mutex.Lock()
+	clients[conn] = struct{}{}
+	mutex.Unlock()
 
-	defer func() {
-		conn.Close()
-		clients.Remove(e)
-	}()
+	defer func(ws *websocket.Conn) {
+		ws.Close()
+		mutex.Lock()
+		delete(clients, ws)
+		mutex.Unlock()
+	}(conn)
 
 	var message string
 	for {
@@ -41,7 +53,10 @@ func handler(conn *websocket.Conn) {
 		}
 
 		log.Println(fmt.Sprintf("- %s -", message))
-		notify(conn, message)
+		if err := notify(conn, message); err != nil {
+			log.Println("notify error: ", err)
+			return
+		}
 	}
 }
 
